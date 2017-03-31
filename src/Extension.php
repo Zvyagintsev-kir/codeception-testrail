@@ -14,8 +14,13 @@ use Codeception\Util\Annotation;
 
 class Extension extends CodeceptionExtension
 {
+    public static $runOnce = TRUE;
+    protected $receiveAllCases;
+    protected $cases;
     const ANNOTATION_SUITE = 'tr-suite';
     const ANNOTATION_CASE  = 'tr-case';
+    const ANNOTATION_TEST_TYPE = 'test-type';
+
 
     const STATUS_SUCCESS    = 'success';
     const STATUS_SKIPPED    = 'skipped';
@@ -78,7 +83,7 @@ class Extension extends CodeceptionExtension
     public function _initialize()
     {
         // we only care to do these things if the extension is enabled
-        if ($this->config['enabled']) {
+        if ($this->config['enabled'] and (self::$runOnce)) {
             $conn = $this->getConnection();
 
             $project = $conn->execute('get_project/'. $this->config['project']);
@@ -94,18 +99,20 @@ class Extension extends CodeceptionExtension
                 'add_plan/'. $project->id,
                 'POST',
                 [
-                'name' => date('Y-m-d H:i:s'),
+                    'name' => date('Y-m-d H:i:s'),
                 ]
             );
 
             $this->project = $project->id;
             $this->plan = $plan->id;
+            $this->receiveAllCases = TRUE;
         }
 
         // merge the statuses from the config over the default ones
         if (array_key_exists('status', $this->config)) {
             $this->statuses = array_merge($this->statuses, $this->config['status']);
         }
+        self::$runOnce = FALSE;
     }
 
     public function afterSuite(SuiteEvent $event)
@@ -134,10 +141,10 @@ class Extension extends CodeceptionExtension
                 '/add_plan_entry/'. $this->plan,
                 'POST',
                 [
-                'suite_id' => $suiteId,
-                'name' => $event->getSuite()->getName(). ' : '. $suiteDetails->name,
-                'case_ids' => $caseIds,
-                'include_all' => false,
+                    'suite_id' => $suiteId,
+                    'name' => $event->getSuite()->getName(). ' : '. $suiteDetails->name,
+                    'case_ids' => $caseIds,
+                    'include_all' => false,
                 ]
             );
 
@@ -153,7 +160,7 @@ class Extension extends CodeceptionExtension
                 '/add_results_for_cases/'. $run->id,
                 'POST',
                 [
-                'results' => $results,
+                    'results' => $results,
                 ]
             );
         }
@@ -174,7 +181,7 @@ class Extension extends CodeceptionExtension
             $case,
             $this->statuses[$this::STATUS_SUCCESS],
             [
-            'elapsed' => $event->getTime(),
+                'elapsed' => $event->getTime(),
             ]
         );
     }
@@ -194,7 +201,7 @@ class Extension extends CodeceptionExtension
             $case,
             $this->statuses[$this::STATUS_SKIPPED],
             [
-            'elapsed' => $event->getTime(),
+                'elapsed' => $event->getTime(),
             ]
         );
     }
@@ -214,7 +221,7 @@ class Extension extends CodeceptionExtension
             $case,
             $this->statuses[$this::STATUS_INCOMPLETE],
             [
-            'elapsed' => $event->getTime(),
+                'elapsed' => $event->getTime(),
             ]
         );
     }
@@ -234,7 +241,7 @@ class Extension extends CodeceptionExtension
             $case,
             $this->statuses[$this::STATUS_FAILED],
             [
-            'elapsed' => $event->getTime(),
+                'elapsed' => $event->getTime(),
             ]
         );
     }
@@ -254,7 +261,7 @@ class Extension extends CodeceptionExtension
             $case,
             $this->statuses[$this::STATUS_ERROR],
             [
-            'elapsed' => $event->getTime(),
+                'elapsed' => $event->getTime(),
             ]
         );
     }
@@ -356,8 +363,18 @@ class Extension extends CodeceptionExtension
         if (!$test instanceof Cest) {
             return null;
         }
-
-        return Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_CASE);
+        $caseType = Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetch($this::ANNOTATION_TEST_TYPE);
+        if ($this->receiveAllCases and ($caseType == 'gen'))
+        {
+            $this->cases = Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetchAll($this::ANNOTATION_CASE);
+            $this->receiveAllCases = FALSE;
+        }
+        elseif ($this->receiveAllCases)
+        {
+            $this->cases = Annotation::forMethod($test->getTestClass(), $test->getTestMethod())->fetchAll($this::ANNOTATION_CASE);
+        }
+        $case = array_shift($this->cases);
+        return $case;
     }
 
     /**
@@ -371,7 +388,7 @@ class Extension extends CodeceptionExtension
     {
         // TestRail doesn't support subsecond times
         if ($time < 1.0) {
-            return '0s';
+            return '1s';
         }
 
         $formatted = '';
